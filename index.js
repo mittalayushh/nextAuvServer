@@ -56,5 +56,17 @@ app.post("/login", validateUser, async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 });
-const PORT = 4001;
+// Return all users (only username and email). Public route (no auth required).
+app.get("/users", async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      select: { username: true, email: true },
+    });
+    res.status(200).json({ users });
+  } catch (err) {
+    console.error("Get users error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+const PORT = process.env.PORT || 4001;
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
