@@ -17,6 +17,7 @@ app.use(express.json());
 app.use("/", authRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/posts/:postId/comments", commentRoutes);
+app.use("/api/comments", commentRoutes); // Allow direct access for update/delete
 app.use("/api/users", userRoutes); // Added userRoutes registration
 
 const PORT = 4001;
