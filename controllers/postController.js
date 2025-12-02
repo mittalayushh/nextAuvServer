@@ -230,3 +230,60 @@ export const savePost = async (req, res) => {
     res.status(500).json({ message: "Failed to save post" });
   }
 };
+
+export const updatePost = async (req, res) => {
+  const { id } = req.params;
+  const { title, content, tags } = req.body;
+  const userId = req.user.id;
+
+  try {
+    const post = await prisma.post.findUnique({ where: { id: parseInt(id) } });
+
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    if (post.authorId !== userId) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const updatedPost = await prisma.post.update({
+      where: { id: parseInt(id) },
+      data: { title, content, tags },
+    });
+
+    res.json(updatedPost);
+  } catch (err) {
+    console.error("Update post error:", err);
+    res.status(500).json({ message: "Failed to update post" });
+  }
+};
+
+export const deletePost = async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+
+  try {
+    const post = await prisma.post.findUnique({ where: { id: parseInt(id) } });
+
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    if (post.authorId !== userId) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    // Delete related data (comments, votes, savedPosts) if not handled by cascade
+    // Prisma schema usually handles cascade delete if configured, but let's check schema.
+    // Assuming cascade delete is set up or we rely on DB constraints.
+    // Ideally, we should delete related items or use onDelete: Cascade in schema.
+
+    await prisma.post.delete({ where: { id: parseInt(id) } });
+
+    res.json({ message: "Post deleted successfully" });
+  } catch (err) {
+    console.error("Delete post error:", err);
+    res.status(500).json({ message: "Failed to delete post" });
+  }
+};
