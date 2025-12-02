@@ -1,10 +1,13 @@
 import express from "express";
-import { createPost, getPosts } from "../controllers/postController.js";
-import { authenticate } from "../middleware/authMiddleware.js";
+import { createPost, getPosts, getPostById, votePost, savePost } from "../controllers/postController.js";
+import { authenticate, authenticateOptional } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
 router.post("/", authenticate, createPost);
-router.get("/", getPosts);
+router.get("/", authenticateOptional, getPosts);
+router.get("/:id", authenticateOptional, getPostById);
+router.post("/:id/vote", authenticate, votePost);
+router.post("/:id/save", authenticate, savePost);
 
 export default router;
