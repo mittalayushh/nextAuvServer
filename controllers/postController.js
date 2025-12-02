@@ -1,12 +1,20 @@
 import prisma from "../utils/prisma.js";
 
+// Helper to calculate hot score
+const calculateHotScore = (votes, date) => {
+  const order = Math.log10(Math.max(Math.abs(votes), 1));
+  const sign = votes > 0 ? 1 : votes < 0 ? -1 : 0;
+  const seconds = (date.getTime() - 1134028003000) / 1000;
+  return Math.round((order + sign * seconds / 45000) * 10000000) / 10000000;
+};
+
 export const createPost = async (req, res) => {
   console.log("Received create post request");
-  const { title, content, tags } = req.body;
+  const { title, content, tags, category } = req.body;
   console.log("req.user object:", req.user);
   const userId = req.user.id;
   console.log("User ID:", userId);
-  console.log("Post Data:", { title, tags });
+  console.log("Post Data:", { title, tags, category });
 
   if (!title) {
     console.log("Validation failed: Title missing");
@@ -14,12 +22,17 @@ export const createPost = async (req, res) => {
   }
 
   try {
+    const now = new Date();
+    const hotScore = calculateHotScore(0, now);
+
     const post = await prisma.post.create({
       data: {
         title,
         content,
         tags: tags || [],
+        category,
         authorId: userId,
+        hotScore,
       },
       include: {
         author: {
@@ -37,26 +50,34 @@ export const createPost = async (req, res) => {
 
 export const getPosts = async (req, res) => {
   console.log("Received GET /api/posts request");
-  const { page = 1, limit = 5, search = "", sort = "newest" } = req.query;
+  const { page = 1, limit = 5, search = "", sort = "newest", tag, category } = req.query;
   const pageNum = parseInt(page);
   const limitNum = parseInt(limit);
   const skip = (pageNum - 1) * limitNum;
 
-  const where = search
-    ? {
-      OR: [
-        { title: { contains: search, mode: "insensitive" } },
-        { content: { contains: search, mode: "insensitive" } },
-        { tags: { hasSome: [search] } }, // Exact match for tags in array
-      ],
-    }
-    : {};
+  const where = {
+    AND: [
+      search
+        ? {
+          OR: [
+            { title: { contains: search, mode: "insensitive" } },
+            { content: { contains: search, mode: "insensitive" } },
+            { tags: { hasSome: [search] } },
+          ],
+        }
+        : {},
+      tag ? { tags: { has: tag } } : {},
+      category ? { category: category } : {},
+    ],
+  };
 
   let orderBy = { createdAt: "desc" };
   if (sort === "oldest") {
     orderBy = { createdAt: "asc" };
   } else if (sort === "top") {
     orderBy = { voteCount: "desc" };
+  } else if (sort === "hot") {
+    orderBy = { hotScore: "desc" };
   }
 
   try {
@@ -185,22 +206,40 @@ export const votePost = async (req, res) => {
       },
     });
 
+    let newVoteCount;
+    let postCreatedAt;
+
+    // Fetch post creation time for hot score calculation
+    const post = await prisma.post.findUnique({ where: { id: postId }, select: { createdAt: true, voteCount: true } });
+    if (!post) throw { code: 'P2003' };
+    postCreatedAt = post.createdAt;
+    newVoteCount = post.voteCount;
+
     if (existingVote) {
       if (existingVote.value === value) {
         // Toggle off (remove vote)
+        newVoteCount -= value;
+        const hotScore = calculateHotScore(newVoteCount, postCreatedAt);
+
         await prisma.$transaction([
           prisma.vote.delete({
             where: { id: existingVote.id },
           }),
           prisma.post.update({
             where: { id: postId },
-            data: { voteCount: { decrement: value } },
+            data: {
+              voteCount: { decrement: value },
+              hotScore
+            },
           }),
         ]);
         return res.json({ message: "Vote removed", value: 0 });
       } else {
         // Change vote
         const voteDiff = value - existingVote.value;
+        newVoteCount += voteDiff;
+        const hotScore = calculateHotScore(newVoteCount, postCreatedAt);
+
         const [updatedVote] = await prisma.$transaction([
           prisma.vote.update({
             where: { id: existingVote.id },
@@ -208,13 +247,19 @@ export const votePost = async (req, res) => {
           }),
           prisma.post.update({
             where: { id: postId },
-            data: { voteCount: { increment: voteDiff } },
+            data: {
+              voteCount: { increment: voteDiff },
+              hotScore
+            },
           }),
         ]);
         return res.json({ message: "Vote updated", value: updatedVote.value });
       }
     } else {
       // Create new vote
+      newVoteCount += value;
+      const hotScore = calculateHotScore(newVoteCount, postCreatedAt);
+
       try {
         const [newVote] = await prisma.$transaction([
           prisma.vote.create({
@@ -226,7 +271,10 @@ export const votePost = async (req, res) => {
           }),
           prisma.post.update({
             where: { id: postId },
-            data: { voteCount: { increment: value } },
+            data: {
+              voteCount: { increment: value },
+              hotScore
+            },
           }),
         ]);
         return res.json({ message: "Vote added", value: newVote.value });
