@@ -21,6 +21,11 @@ export const createPost = async (req, res) => {
         tags: tags || [],
         authorId: userId,
       },
+      include: {
+        author: {
+          select: { username: true, email: true },
+        },
+      },
     });
     console.log("Post created successfully:", post.id);
     res.status(201).json({ message: "Post created successfully", post });
