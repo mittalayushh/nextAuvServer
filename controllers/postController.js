@@ -37,14 +37,25 @@ export const createPost = async (req, res) => {
 
 export const getPosts = async (req, res) => {
   console.log("Received GET /api/posts request");
-  const { page = 1, limit = 5 } = req.query;
+  const { page = 1, limit = 5, search = "" } = req.query;
   const pageNum = parseInt(page);
   const limitNum = parseInt(limit);
   const skip = (pageNum - 1) * limitNum;
 
+  const where = search
+    ? {
+      OR: [
+        { title: { contains: search, mode: "insensitive" } },
+        { content: { contains: search, mode: "insensitive" } },
+        { tags: { hasSome: [search] } }, // Exact match for tags in array
+      ],
+    }
+    : {};
+
   try {
     const [posts, totalPosts] = await Promise.all([
       prisma.post.findMany({
+        where,
         skip: skip,
         take: limitNum,
         orderBy: { createdAt: "desc" },
@@ -55,7 +66,7 @@ export const getPosts = async (req, res) => {
           votes: true,
         },
       }),
-      prisma.post.count(),
+      prisma.post.count({ where }),
     ]);
 
     const totalPages = Math.ceil(totalPosts / limitNum);
