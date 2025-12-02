@@ -32,10 +32,15 @@ export const createComment = async (req, res) => {
 
 export const getComments = async (req, res) => {
   const { postId } = req.params;
+  const { cursor, limit = 10 } = req.query;
+  const take = parseInt(limit);
 
   try {
     const comments = await prisma.comment.findMany({
       where: { postId: parseInt(postId) },
+      take: take + 1,
+      cursor: cursor ? { id: parseInt(cursor) } : undefined,
+      skip: cursor ? 1 : 0,
       include: {
         author: {
           select: { username: true },
@@ -51,13 +56,13 @@ export const getComments = async (req, res) => {
       orderBy: { createdAt: "asc" },
     });
 
-    // Organize comments into a tree structure if needed, or return flat list
-    // For now, let's return all comments and let frontend handle nesting or return top-level only
-    // Actually, a better approach for deep nesting is to fetch all and build tree in frontend,
-    // OR fetch top-level and load replies on demand.
-    // Let's fetch all for this post for simplicity.
+    let nextCursor = null;
+    if (comments.length > take) {
+      const nextItem = comments.pop();
+      nextCursor = nextItem.id;
+    }
 
-    res.json(comments);
+    res.json({ comments, nextCursor });
   } catch (err) {
     console.error("Get comments error:", err);
     res.status(500).json({ message: "Failed to fetch comments" });

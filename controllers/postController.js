@@ -37,9 +37,15 @@ export const createPost = async (req, res) => {
 
 export const getPosts = async (req, res) => {
   console.log("Received GET /api/posts request");
+  const { cursor, limit = 10 } = req.query;
+  const take = parseInt(limit);
+
   try {
     const posts = await prisma.post.findMany({
-      orderBy: { createdAt: "desc" },
+      take: take + 1, // Fetch one extra to determine if there's a next page
+      cursor: cursor ? { id: parseInt(cursor) } : undefined,
+      skip: cursor ? 1 : 0, // Skip the cursor itself if provided
+      orderBy: { createdAt: "desc" }, // Or id: 'desc' if you prefer consistent ordering by ID
       include: {
         author: {
           select: { username: true, email: true },
@@ -48,16 +54,17 @@ export const getPosts = async (req, res) => {
       },
     });
 
+    let nextCursor = null;
+    if (posts.length > take) {
+      const nextItem = posts.pop(); // Remove the extra item
+      nextCursor = nextItem.id;
+    }
+
     // Calculate vote counts and check if saved
     const postsWithVotes = posts.map(post => {
       const voteCount = post.votes.reduce((acc, vote) => acc + vote.value, 0);
       const userVote = req.user ? post.votes.find(v => v.userId === req.user.id)?.value || 0 : 0;
-      // Check if saved by current user (requires fetching savedPosts or checking relation if included)
-      // Since we didn't include savedBy in the main query, we might need a different approach or include it.
-      // Let's include savedBy in the main query but filtered by user if possible, or just map it.
-      // Prisma doesn't support filtering filtered relations easily in include without a separate query or advanced features.
-      // A simpler way for now: fetch user's saved post IDs separately if user is logged in.
-      const { votes, ...postData } = post; // Destructure votes to remove it from the final post object
+      const { votes, ...postData } = post; 
       return { ...postData, voteCount, userVote };
     });
 
@@ -73,11 +80,11 @@ export const getPosts = async (req, res) => {
         ...post,
         isSaved: savedPostIds.has(post.id)
       }));
-      console.log(`Found ${posts.length} posts`);
-      res.json(finalPosts);
+      console.log(`Found ${finalPosts.length} posts`);
+      res.json({ posts: finalPosts, nextCursor });
     } else {
-      console.log(`Found ${posts.length} posts`);
-      res.json(postsWithVotes.map(p => ({ ...p, isSaved: false })));
+      console.log(`Found ${postsWithVotes.length} posts`);
+      res.json({ posts: postsWithVotes.map(p => ({ ...p, isSaved: false })), nextCursor });
     }
   } catch (err) {
     console.error("Get posts error:", err);
