@@ -143,6 +143,7 @@ export const getPosts = async (req, res) => {
     }
   } catch (err) {
     console.error("Get posts error:", err);
+    console.error(err.stack);
     res.status(500).json({ message: "Failed to retrieve posts: " + err.message });
   }
 };
@@ -296,7 +297,12 @@ export const votePost = async (req, res) => {
     if (err.code === 'P2003') {
       return res.status(404).json({ message: "Post not found" });
     }
-    res.status(500).json({ message: "Failed to vote" });
+    if (err.code === 'P2025') {
+      // Record to delete does not exist - likely a race condition where it was already deleted.
+      // We can consider this a success (vote removed).
+      return res.json({ message: "Vote removed (already deleted)", value: 0 });
+    }
+    res.status(500).json({ message: "Failed to vote: " + err.message });
   }
 };
 
