@@ -37,34 +37,34 @@ export const createPost = async (req, res) => {
 
 export const getPosts = async (req, res) => {
   console.log("Received GET /api/posts request");
-  const { cursor, limit = 10 } = req.query;
-  const take = parseInt(limit);
+  const { page = 1, limit = 5 } = req.query;
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
+  const skip = (pageNum - 1) * limitNum;
 
   try {
-    const posts = await prisma.post.findMany({
-      take: take + 1, // Fetch one extra to determine if there's a next page
-      cursor: cursor ? { id: parseInt(cursor) } : undefined,
-      skip: cursor ? 1 : 0, // Skip the cursor itself if provided
-      orderBy: { createdAt: "desc" }, // Or id: 'desc' if you prefer consistent ordering by ID
-      include: {
-        author: {
-          select: { username: true, email: true },
+    const [posts, totalPosts] = await Promise.all([
+      prisma.post.findMany({
+        skip: skip,
+        take: limitNum,
+        orderBy: { createdAt: "desc" },
+        include: {
+          author: {
+            select: { username: true, email: true },
+          },
+          votes: true,
         },
-        votes: true,
-      },
-    });
+      }),
+      prisma.post.count(),
+    ]);
 
-    let nextCursor = null;
-    if (posts.length > take) {
-      const nextItem = posts.pop(); // Remove the extra item
-      nextCursor = nextItem.id;
-    }
+    const totalPages = Math.ceil(totalPosts / limitNum);
 
     // Calculate vote counts and check if saved
     const postsWithVotes = posts.map(post => {
       const voteCount = post.votes.reduce((acc, vote) => acc + vote.value, 0);
       const userVote = req.user ? post.votes.find(v => v.userId === req.user.id)?.value || 0 : 0;
-      const { votes, ...postData } = post; 
+      const { votes, ...postData } = post;
       return { ...postData, voteCount, userVote };
     });
 
@@ -80,11 +80,27 @@ export const getPosts = async (req, res) => {
         ...post,
         isSaved: savedPostIds.has(post.id)
       }));
-      console.log(`Found ${finalPosts.length} posts`);
-      res.json({ posts: finalPosts, nextCursor });
+      console.log(`Found ${finalPosts.length} posts for page ${pageNum}`);
+      res.json({
+        posts: finalPosts,
+        pagination: {
+          total: totalPosts,
+          pages: totalPages,
+          page: pageNum,
+          limit: limitNum
+        }
+      });
     } else {
-      console.log(`Found ${postsWithVotes.length} posts`);
-      res.json({ posts: postsWithVotes.map(p => ({ ...p, isSaved: false })), nextCursor });
+      console.log(`Found ${postsWithVotes.length} posts for page ${pageNum}`);
+      res.json({
+        posts: postsWithVotes.map(p => ({ ...p, isSaved: false })),
+        pagination: {
+          total: totalPosts,
+          pages: totalPages,
+          page: pageNum,
+          limit: limitNum
+        }
+      });
     }
   } catch (err) {
     console.error("Get posts error:", err);
