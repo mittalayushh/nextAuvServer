@@ -37,7 +37,7 @@ export const createPost = async (req, res) => {
 
 export const getPosts = async (req, res) => {
   console.log("Received GET /api/posts request");
-  const { page = 1, limit = 5, search = "" } = req.query;
+  const { page = 1, limit = 5, search = "", sort = "newest" } = req.query;
   const pageNum = parseInt(page);
   const limitNum = parseInt(limit);
   const skip = (pageNum - 1) * limitNum;
@@ -52,13 +52,20 @@ export const getPosts = async (req, res) => {
     }
     : {};
 
+  let orderBy = { createdAt: "desc" };
+  if (sort === "oldest") {
+    orderBy = { createdAt: "asc" };
+  } else if (sort === "top") {
+    orderBy = { voteCount: "desc" };
+  }
+
   try {
     const [posts, totalPosts] = await Promise.all([
       prisma.post.findMany({
         where,
         skip: skip,
         take: limitNum,
-        orderBy: { createdAt: "desc" },
+        orderBy,
         include: {
           author: {
             select: { username: true, email: true },
@@ -181,28 +188,47 @@ export const votePost = async (req, res) => {
     if (existingVote) {
       if (existingVote.value === value) {
         // Toggle off (remove vote)
-        await prisma.vote.delete({
-          where: { id: existingVote.id },
-        });
+        await prisma.$transaction([
+          prisma.vote.delete({
+            where: { id: existingVote.id },
+          }),
+          prisma.post.update({
+            where: { id: postId },
+            data: { voteCount: { decrement: value } },
+          }),
+        ]);
         return res.json({ message: "Vote removed", value: 0 });
       } else {
         // Change vote
-        const updatedVote = await prisma.vote.update({
-          where: { id: existingVote.id },
-          data: { value },
-        });
+        const voteDiff = value - existingVote.value;
+        const [updatedVote] = await prisma.$transaction([
+          prisma.vote.update({
+            where: { id: existingVote.id },
+            data: { value },
+          }),
+          prisma.post.update({
+            where: { id: postId },
+            data: { voteCount: { increment: voteDiff } },
+          }),
+        ]);
         return res.json({ message: "Vote updated", value: updatedVote.value });
       }
     } else {
       // Create new vote
       try {
-        const newVote = await prisma.vote.create({
-          data: {
-            userId,
-            postId,
-            value,
-          },
-        });
+        const [newVote] = await prisma.$transaction([
+          prisma.vote.create({
+            data: {
+              userId,
+              postId,
+              value,
+            },
+          }),
+          prisma.post.update({
+            where: { id: postId },
+            data: { voteCount: { increment: value } },
+          }),
+        ]);
         return res.json({ message: "Vote added", value: newVote.value });
       } catch (err) {
         if (err.code === 'P2002') {
